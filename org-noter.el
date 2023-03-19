@@ -67,6 +67,16 @@
   :group 'convenience
   :version "25.3.1")
 
+(defcustom org-noter-one-file-per-doc nil
+  "When non-nil, each document will have its own notes file."
+  :group 'org-noter
+  :type 'boolean)
+
+(defcustom org-noter-default-file-header ""
+  "The default header for a created notes file."
+  :group 'org-noter
+  :type 'string)
+
 (defcustom org-noter-property-doc-file "NOTER_DOCUMENT"
   "Name of the property that specifies the document."
   :group 'org-noter
@@ -327,6 +337,9 @@ The title used will be the default one."
 
 ;; --------------------------------------------------------------------------------
 ;; NOTE(nox): Utility functions
+(defun org-noter--is-empty-file ()
+  (save-excursion (beginning-of-line) (looking-at "[[:space:]]*$")))
+
 (defun org-noter--get-new-id ()
   (catch 'break
     (while t
@@ -1279,6 +1292,12 @@ relative to."
   (and doc-prop (not (file-directory-p doc-prop)) (file-readable-p doc-prop)))
 
 (defun org-noter--get-or-read-document-property (inherit-prop &optional force-new)
+  "Get the document property from the current entry, or ask the user for it.
+
+If INHERIT-PROP is non-nil, it will also look for the property in the parent entries.
+
+If FORCE-NEW is non-nil, it will always ask the user for the document property.
+"
   (let ((doc-prop (and (not force-new) (org-entry-get nil org-noter-property-doc-file inherit-prop))))
     (unless (org-noter--check-doc-prop doc-prop)
       (setq doc-prop nil)
@@ -2180,8 +2199,10 @@ notes file, even if it finds one."
              ;; NOTE(nox): This is the path that is actually going to be used, and should
              ;; be the same as `buffer-file-name', but is needed for the truename workaround
              (document-used-path (expand-file-name document-name document-directory))
-
-             (search-names (append org-noter-default-notes-file-names (list (concat document-base ".org"))))
+             (document-base-org (concat document-base ".org"))
+             (search-names (append (if (not org-noter-one-file-per-doc)
+                                       org-noter-default-notes-file-names
+                                     '()) (list document-base-org)))
              notes-files-annotating     ; List of files annotating document
              notes-files                ; List of found notes files (annotating or not)
 
@@ -2266,8 +2287,12 @@ notes file, even if it finds one."
               (setq notes-files-annotating notes-files)
             (with-current-buffer (find-file-noselect (car notes-files))
               (goto-char (point-max))
-              (insert (if (save-excursion (beginning-of-line) (looking-at "[[:space:]]*$")) "" "\n")
-                      "* " document-base)
+              ;; NOTE(torfjelde): If we're at the beginning of the file, insert the default file header.
+              (when (org-noter--is-empty-file)
+                (insert org-noter-default-file-header "\n"))
+              ;; Insert heading for the document.
+              (insert "* " document-base)
+              ;; Add the property.
               (org-entry-put nil org-noter-property-doc-file
                              (file-relative-name document-used-path
                                                  (file-name-directory (car notes-files)))))
